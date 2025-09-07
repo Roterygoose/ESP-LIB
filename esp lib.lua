@@ -3,14 +3,14 @@
 	https://github.com/Exunys
 	- Box						  > [Players, NPCs & Parts]
 	- Health Bar				  > [Players & NPCs]
-	- Health Text				  > [Players & NPCs]
+	- Health Text				  > [Players & NPCs] (Added feature)
 ]]
 
 --// Caching
 local game = game
 local assert, loadstring, select, next, type, typeof, pcall, xpcall, setmetatable, getmetatable, tick, warn = assert, loadstring, select, next, type, typeof, pcall, xpcall, setmetatable, getmetatable, tick, warn
 local mathfloor, mathabs, mathcos, mathsin, mathrad, mathdeg, mathmin, mathmax, mathclamp, mathrandom = math.floor, math.abs, math.cos, math.sin, math.rad, math.deg, math.min, math.max, math.clamp, math.random
-local stringformat, stringfind, stringchar = string.format, string.find, string.char
+local stringformat, stringfind, stringchar, tostring = string.format, string.find, string.char, tostring
 local unpack = table.unpack
 local wait, spawn = task.wait, task.spawn
 local getgenv, getrawmetatable, getupvalue, gethiddenproperty, cloneref, clonefunction = getgenv, getrawmetatable, debug.getupvalue, gethiddenproperty, cloneref or function(...)
@@ -171,16 +171,14 @@ getgenv().ExunysDeveloperESP = {
 		HealthText = {
 			Enabled = true,
 			RainbowColor = false,
-			RainbowOutlineColor = false,
-			Offset = 5,
-
-			Color = Color3fromRGB(255, 255, 255),
-			Transparency = 1,
-			Size = 14,
-			Font = DrawingFonts.Plex,
-
+			Offset = 8,
+			Position = 3,
+			Size = 13,
+			Font = 2,
+			Center = true,
+			Outline = true,
 			OutlineColor = Color3fromRGB(0, 0, 0),
-			Outline = true
+			Transparency = 1
 		}
 	},
 
@@ -210,18 +208,6 @@ local CoreFunctions = {
 
 	GetColorFromHealth = function(Health, MaxHealth, Blue)
 		return Color3fromRGB(255 - mathfloor(Health / MaxHealth * 255), mathfloor(Health / MaxHealth * 255), Blue or 0)
-	end,
-
-	GetHealthTextColor = function(Health, MaxHealth)
-		local HealthPercent = Health / MaxHealth
-		
-		if HealthPercent > 0.7 then
-			return Color3fromRGB(0, 255, 0) -- Green for high health
-		elseif HealthPercent > 0.3 then
-			return Color3fromRGB(255, 255, 0) -- Yellow for medium health
-		else
-			return Color3fromRGB(255, 0, 0) -- Red for low health
-		end
 	end,
 
 	GetRainbowColor = function()
@@ -456,35 +442,38 @@ local UpdatingFunctions = {
 		end
 	end,
 
-	HealthText = function(Entry, HealthTextObject, HealthTextOutlineObject)
+	HealthText = function(Entry, TextObject, Humanoid)
 		local Settings = Environment.Properties.HealthText
 
 		local ScreenCorners, OnScreen = CoreFunctions.CalculateBoundingBox(Entry)
 
-		setrenderproperty(HealthTextObject, "Visible", OnScreen and Settings.Enabled)
-		setrenderproperty(HealthTextOutlineObject, "Visible", OnScreen and Settings.Enabled and Settings.Outline)
+		setrenderproperty(TextObject, "Visible", OnScreen)
 
-		if getrenderproperty(HealthTextObject, "Visible") then
+		if getrenderproperty(TextObject, "Visible") then
 			for Index, Value in next, Settings do
-				if stringfind(Index, "Color") then
+				if Index == "Color" then
 					continue
 				end
 
-				if not pcall(getrenderproperty, HealthTextObject, Index) then
+				if not pcall(getrenderproperty, TextObject, Index) then
 					continue
 				end
 
-				setrenderproperty(HealthTextObject, Index, Value)
-				if Settings.Outline then
-					setrenderproperty(HealthTextOutlineObject, Index, Value)
-				end
+				setrenderproperty(TextObject, Index, Value)
 			end
 
-			local Humanoid = FindFirstChildOfClass(__index(Entry.Object, "Character"), "Humanoid")
+			Humanoid = Humanoid or FindFirstChildOfClass(__index(Entry.Object, "Character"), "Humanoid")
+
 			local MaxHealth = Humanoid and __index(Humanoid, "MaxHealth") or 100
 			local Health = Humanoid and mathclamp(__index(Humanoid, "Health"), 0, MaxHealth) or 0
 
-			-- Calculate health text position (top right of bounding box)
+			-- Set health text
+			setrenderproperty(TextObject, "Text", tostring(mathfloor(Health)))
+
+			-- Set color based on health
+			setrenderproperty(TextObject, "Color", CoreFunctions.GetColorFromHealth(Health, MaxHealth, 0))
+
+			-- Calculate text position based on bounding box
 			local minX, maxX, minY, maxY = math.huge, -math.huge, math.huge, -math.huge
 			for _, Corner in ipairs(ScreenCorners) do
 				minX = mathmin(minX, Corner.X)
@@ -493,29 +482,21 @@ local UpdatingFunctions = {
 				maxY = mathmax(maxY, Corner.Y)
 			end
 
-			local Offset = mathclamp(Settings.Offset, 5, 15)
-			local TextPosition = Vector2new(maxX + Offset, minY)
+			local BoxWidth = maxX - minX
+			local BoxHeight = maxY - minY
+			local Offset = mathclamp(Settings.Offset, 8, 16)
 
-			setrenderproperty(HealthTextObject, "Position", TextPosition)
-			setrenderproperty(HealthTextObject, "Text", stringformat("%d/%d", mathfloor(Health), MaxHealth))
-			
-			-- Set color based on health percentage
-			local HealthPercent = Health / MaxHealth
-			if HealthPercent > 0.7 then
-				setrenderproperty(HealthTextObject, "Color", Color3fromRGB(0, 255, 0)) -- Green for high health
-			elseif HealthPercent > 0.3 then
-				setrenderproperty(HealthTextObject, "Color", Color3fromRGB(255, 255, 0)) -- Yellow for medium health
+			if Settings.Position == 1 then -- Top
+				setrenderproperty(TextObject, "Position", Vector2new(minX + BoxWidth / 2, minY - Offset))
+			elseif Settings.Position == 2 then -- Bottom
+				setrenderproperty(TextObject, "Position", Vector2new(minX + BoxWidth / 2, maxY + Offset))
+			elseif Settings.Position == 3 then -- Left
+				setrenderproperty(TextObject, "Position", Vector2new(minX - Offset, maxY - BoxHeight / 2))
+			elseif Settings.Position == 4 then -- Right
+				setrenderproperty(TextObject, "Position", Vector2new(maxX + Offset, maxY - BoxHeight / 2))
 			else
-				setrenderproperty(HealthTextObject, "Color", Color3fromRGB(255, 0, 0)) -- Red for low health
+				Settings.Position = 3
 			end
-
-			if Settings.Outline then
-				setrenderproperty(HealthTextOutlineObject, "Position", TextPosition)
-				setrenderproperty(HealthTextOutlineObject, "Text", getrenderproperty(HealthTextObject, "Text"))
-				setrenderproperty(HealthTextOutlineObject, "Color", Settings.RainbowOutlineColor and CoreFunctions.GetRainbowColor() or Settings.OutlineColor)
-			end
-		else
-			setrenderproperty(HealthTextOutlineObject, "Visible", false)
 		end
 	end
 }
@@ -587,10 +568,10 @@ local CreatingFunctions = {
 		local Settings = Environment.Properties.HealthBar
 
 		local Outline = Drawingnew("Line")
-		local OutlineObject = Outline--[[._OBJECT]]
+		local OutlineObject = Outline
 
 		local Main = Drawingnew("Line")
-		local MainObject = Main--[[._OBJECT]]
+		local MainObject = Main
 
 		Entry.Visuals.HealthBar[1] = Main
 		Entry.Visuals.HealthBar[2] = Outline
@@ -631,14 +612,10 @@ local CreatingFunctions = {
 
 		local Settings = Environment.Properties.HealthText
 
-		local HealthTextOutline = Drawingnew("Text")
-		local HealthTextOutlineObject = HealthTextOutline--[[._OBJECT]]
+		local Text = Drawingnew("Text")
+		local TextObject = Text
 
-		local HealthText = Drawingnew("Text")
-		local HealthTextObject = HealthText--[[._OBJECT]]
-
-		Entry.Visuals.HealthText[1] = HealthText
-		Entry.Visuals.HealthText[2] = HealthTextOutline
+		Entry.Visuals.HealthText = Text
 
 		Entry.Connections.HealthText = Connect(__index(RunService, Environment.DeveloperSettings.UpdateMode), function()
 			local Functionable, Ready = pcall(function()
@@ -646,17 +623,14 @@ local CreatingFunctions = {
 			end)
 
 			if not Functionable then
-				pcall(HealthText.Remove, HealthText)
-				pcall(HealthTextOutline.Remove, HealthTextOutline)
-
+				pcall(Text.Remove, Text)
 				return Disconnect(Entry.Connections.HealthText)
 			end
 
 			if Ready then
-				UpdatingFunctions.HealthText(Entry, HealthTextObject, HealthTextOutlineObject)
+				UpdatingFunctions.HealthText(Entry, TextObject, Humanoid)
 			else
-				setrenderproperty(HealthTextObject, "Visible", false)
-				setrenderproperty(HealthTextOutlineObject, "Visible", false)
+				setrenderproperty(TextObject, "Visible", false)
 			end
 		end)
 	end
@@ -803,7 +777,7 @@ local UtilityFunctions = {
 			Visuals = {
 				Box = {},
 				HealthBar = {},
-				HealthText = {}
+				HealthText = nil
 			},
 
 			Connections = {}
@@ -876,7 +850,7 @@ local UtilityFunctions = {
 								pcall(Line.Remove, Line)
 							end
 						end
-					elseif _Value--[[._OBJECT]] then
+					elseif _Value then
 						pcall(_Value.Remove, _Value)
 					end
 				end)
