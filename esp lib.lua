@@ -3,6 +3,7 @@
 	https://github.com/Exunys
 	- Box						  > [Players, NPCs & Parts]
 	- Health Bar				  > [Players & NPCs]
+	- Health Text				  > [Players & NPCs]
 ]]
 
 --// Caching
@@ -165,6 +166,21 @@ getgenv().ExunysDeveloperESP = {
 
 			OutlineColor = Color3fromRGB(0, 0, 0),
 			Outline = true
+		},
+
+		HealthText = {
+			Enabled = true,
+			RainbowColor = false,
+			RainbowOutlineColor = false,
+			Offset = 5,
+
+			Color = Color3fromRGB(255, 255, 255),
+			Transparency = 1,
+			Size = 14,
+			Font = DrawingFonts.Plex,
+
+			OutlineColor = Color3fromRGB(0, 0, 0),
+			Outline = true
 		}
 	},
 
@@ -194,6 +210,18 @@ local CoreFunctions = {
 
 	GetColorFromHealth = function(Health, MaxHealth, Blue)
 		return Color3fromRGB(255 - mathfloor(Health / MaxHealth * 255), mathfloor(Health / MaxHealth * 255), Blue or 0)
+	end,
+
+	GetHealthTextColor = function(Health, MaxHealth)
+		local HealthPercent = Health / MaxHealth
+		
+		if HealthPercent > 0.7 then
+			return Color3fromRGB(0, 255, 0) -- Green for high health
+		elseif HealthPercent > 0.3 then
+			return Color3fromRGB(255, 255, 0) -- Yellow for medium health
+		else
+			return Color3fromRGB(255, 0, 0) -- Red for low health
+		end
 	end,
 
 	GetRainbowColor = function()
@@ -426,6 +454,69 @@ local UpdatingFunctions = {
 				setrenderproperty(OutlineObject, "Transparency", Settings.Transparency)
 			end
 		end
+	end,
+
+	HealthText = function(Entry, HealthTextObject, HealthTextOutlineObject)
+		local Settings = Environment.Properties.HealthText
+
+		local ScreenCorners, OnScreen = CoreFunctions.CalculateBoundingBox(Entry)
+
+		setrenderproperty(HealthTextObject, "Visible", OnScreen and Settings.Enabled)
+		setrenderproperty(HealthTextOutlineObject, "Visible", OnScreen and Settings.Enabled and Settings.Outline)
+
+		if getrenderproperty(HealthTextObject, "Visible") then
+			for Index, Value in next, Settings do
+				if stringfind(Index, "Color") then
+					continue
+				end
+
+				if not pcall(getrenderproperty, HealthTextObject, Index) then
+					continue
+				end
+
+				setrenderproperty(HealthTextObject, Index, Value)
+				if Settings.Outline then
+					setrenderproperty(HealthTextOutlineObject, Index, Value)
+				end
+			end
+
+			local Humanoid = FindFirstChildOfClass(__index(Entry.Object, "Character"), "Humanoid")
+			local MaxHealth = Humanoid and __index(Humanoid, "MaxHealth") or 100
+			local Health = Humanoid and mathclamp(__index(Humanoid, "Health"), 0, MaxHealth) or 0
+
+			-- Calculate health text position (top right of bounding box)
+			local minX, maxX, minY, maxY = math.huge, -math.huge, math.huge, -math.huge
+			for _, Corner in ipairs(ScreenCorners) do
+				minX = mathmin(minX, Corner.X)
+				maxX = mathmax(maxX, Corner.X)
+				minY = mathmin(minY, Corner.Y)
+				maxY = mathmax(maxY, Corner.Y)
+			end
+
+			local Offset = mathclamp(Settings.Offset, 5, 15)
+			local TextPosition = Vector2new(maxX + Offset, minY)
+
+			setrenderproperty(HealthTextObject, "Position", TextPosition)
+			setrenderproperty(HealthTextObject, "Text", stringformat("%d/%d", mathfloor(Health), MaxHealth))
+			
+			-- Set color based on health percentage
+			local HealthPercent = Health / MaxHealth
+			if HealthPercent > 0.7 then
+				setrenderproperty(HealthTextObject, "Color", Color3fromRGB(0, 255, 0)) -- Green for high health
+			elseif HealthPercent > 0.3 then
+				setrenderproperty(HealthTextObject, "Color", Color3fromRGB(255, 255, 0)) -- Yellow for medium health
+			else
+				setrenderproperty(HealthTextObject, "Color", Color3fromRGB(255, 0, 0)) -- Red for low health
+			end
+
+			if Settings.Outline then
+				setrenderproperty(HealthTextOutlineObject, "Position", TextPosition)
+				setrenderproperty(HealthTextOutlineObject, "Text", getrenderproperty(HealthTextObject, "Text"))
+				setrenderproperty(HealthTextOutlineObject, "Color", Settings.RainbowOutlineColor and CoreFunctions.GetRainbowColor() or Settings.OutlineColor)
+			end
+		else
+			setrenderproperty(HealthTextOutlineObject, "Visible", false)
+		end
 	end
 }
 
@@ -521,6 +612,51 @@ local CreatingFunctions = {
 			else
 				setrenderproperty(MainObject, "Visible", false)
 				setrenderproperty(OutlineObject, "Visible", false)
+			end
+		end)
+	end,
+
+	HealthText = function(Entry)
+		local Allowed = Entry.Allowed
+
+		if type(Allowed) == "table" and type(Allowed.HealthText) == "boolean" and not Allowed.HealthText then
+			return
+		end
+
+		local Humanoid = FindFirstChildOfClass(__index(Entry.Object, "Parent"), "Humanoid")
+
+		if not Entry.IsAPlayer and not Humanoid then
+			return
+		end
+
+		local Settings = Environment.Properties.HealthText
+
+		local HealthTextOutline = Drawingnew("Text")
+		local HealthTextOutlineObject = HealthTextOutline--[[._OBJECT]]
+
+		local HealthText = Drawingnew("Text")
+		local HealthTextObject = HealthText--[[._OBJECT]]
+
+		Entry.Visuals.HealthText[1] = HealthText
+		Entry.Visuals.HealthText[2] = HealthTextOutline
+
+		Entry.Connections.HealthText = Connect(__index(RunService, Environment.DeveloperSettings.UpdateMode), function()
+			local Functionable, Ready = pcall(function()
+				return Environment.Settings.Enabled and Settings.Enabled and Entry.Checks.Ready
+			end)
+
+			if not Functionable then
+				pcall(HealthText.Remove, HealthText)
+				pcall(HealthTextOutline.Remove, HealthTextOutline)
+
+				return Disconnect(Entry.Connections.HealthText)
+			end
+
+			if Ready then
+				UpdatingFunctions.HealthText(Entry, HealthTextObject, HealthTextOutlineObject)
+			else
+				setrenderproperty(HealthTextObject, "Visible", false)
+				setrenderproperty(HealthTextOutlineObject, "Visible", false)
 			end
 		end)
 	end
@@ -666,7 +802,8 @@ local UtilityFunctions = {
 
 			Visuals = {
 				Box = {},
-				HealthBar = {}
+				HealthBar = {},
+				HealthText = {}
 			},
 
 			Connections = {}
@@ -703,6 +840,7 @@ local UtilityFunctions = {
 
 			CreatingFunctions.Box(Entry)
 			CreatingFunctions.HealthBar(Entry)
+			CreatingFunctions.HealthText(Entry)
 
 			WrappedObjects[Entry.Hash] = Entry
 
