@@ -3,14 +3,14 @@
 	https://github.com/Exunys
 	- Box						  > [Players, NPCs & Parts]
 	- Health Bar				  > [Players & NPCs]
-	- Health Text				  > [Players & NPCs] (Added feature)
+	- Health Text				  > [Players & NPCs]
 ]]
 
 --// Caching
 local game = game
 local assert, loadstring, select, next, type, typeof, pcall, xpcall, setmetatable, getmetatable, tick, warn = assert, loadstring, select, next, type, typeof, pcall, xpcall, setmetatable, getmetatable, tick, warn
 local mathfloor, mathabs, mathcos, mathsin, mathrad, mathdeg, mathmin, mathmax, mathclamp, mathrandom = math.floor, math.abs, math.cos, math.sin, math.rad, math.deg, math.min, math.max, math.clamp, math.random
-local stringformat, stringfind, stringchar, tostring = string.format, string.find, string.char, tostring
+local stringformat, stringfind, stringchar = string.format, string.find, string.char
 local unpack = table.unpack
 local wait, spawn = task.wait, task.spawn
 local getgenv, getrawmetatable, getupvalue, gethiddenproperty, cloneref, clonefunction = getgenv, getrawmetatable, debug.getupvalue, gethiddenproperty, cloneref or function(...)
@@ -167,18 +167,18 @@ getgenv().ExunysDeveloperESP = {
 			OutlineColor = Color3fromRGB(0, 0, 0),
 			Outline = true
 		},
-
+		
 		HealthText = {
 			Enabled = true,
-			RainbowColor = false,
-			Offset = 8,
+			RainbowOutlineColor = false,
+			Offset = 4,
 			Position = 3,
 			Size = 13,
-			Font = 2,
-			Center = true,
+			Font = DrawingFonts.UI,
 			Outline = true,
-			OutlineColor = Color3fromRGB(0, 0, 0),
-			Transparency = 1
+			
+			Transparency = 1,
+			OutlineColor = Color3fromRGB(0, 0, 0)
 		}
 	},
 
@@ -244,15 +244,33 @@ local CoreFunctions = {
 			return nil, false
 		end
 
-		local CF = __index(Part, "CFrame")
-		local Size = __index(Part, "Size")
+		-- Get the model that contains the part
+		local Model = IsAPlayer and __index(Object, "Character") or __index(Part, "Parent")
+		if not Model or not IsA(Model, "Model") then
+			return nil, false
+		end
 
-		-- Calculate 2D bounding box corners (front face only)
+		-- Calculate bounding box corners
+		local CF = __index(Part, "CFrame")
+		local Size = Vector3zero
+		
+		-- Try to get the actual model size if possible
+		if pcall(function() Size = __index(Model, "GetExtentsSize") and __index(Model, "GetExtentsSize")(Model) end) then
+			-- Use model extents size
+		else
+			-- Fallback to part size for non-models
+			Size = __index(Part, "Size")
+		end
+
 		local Corners = {
-			CF * CFramenew(Size.X/2, Size.Y/2, Size.Z/2),  -- Top Right
-			CF * CFramenew(-Size.X/2, Size.Y/2, Size.Z/2), -- Top Left
-			CF * CFramenew(Size.X/2, -Size.Y/2, Size.Z/2), -- Bottom Right
-			CF * CFramenew(-Size.X/2, -Size.Y/2, Size.Z/2) -- Bottom Left
+			CF * CFramenew(Size.X/2, Size.Y/2, Size.Z/2),  -- Top Front Right
+			CF * CFramenew(-Size.X/2, Size.Y/2, Size.Z/2), -- Top Front Left
+			CF * CFramenew(Size.X/2, -Size.Y/2, Size.Z/2), -- Bottom Front Right
+			CF * CFramenew(-Size.X/2, -Size.Y/2, Size.Z/2),-- Bottom Front Left
+			CF * CFramenew(Size.X/2, Size.Y/2, -Size.Z/2), -- Top Back Right
+			CF * CFramenew(-Size.X/2, Size.Y/2, -Size.Z/2),-- Top Back Left
+			CF * CFramenew(Size.X/2, -Size.Y/2, -Size.Z/2),-- Bottom Back Right
+			CF * CFramenew(-Size.X/2, -Size.Y/2, -Size.Z/2) -- Bottom Back Left
 		}
 
 		-- Convert corners to screen space
@@ -284,7 +302,7 @@ local UpdatingFunctions = {
 		local ScreenCorners, OnScreen = CoreFunctions.CalculateBoundingBox(Entry)
 
 		-- Update visibility
-		for i = 1, 4 do
+		for i = 1, 12 do
 			setrenderproperty(BoxLines[i], "Visible", OnScreen)
 			if Settings.Outline then
 				setrenderproperty(BoxOutlineLines[i], "Visible", OnScreen)
@@ -293,7 +311,7 @@ local UpdatingFunctions = {
 
 		if OnScreen then
 			-- Update line properties
-			for i = 1, 4 do
+			for i = 1, 12 do
 				for Index, Value in next, Settings do
 					if Index == "Color" or Index == "OutlineColor" then
 						continue
@@ -317,12 +335,11 @@ local UpdatingFunctions = {
 				end
 			end
 
-			-- Define 2D box edges (4 lines for a rectangle)
+			-- Define box edges (12 lines for a complete box)
 			local Edges = {
-				{1, 2}, -- Top
-				{2, 4}, -- Left
-				{4, 3}, -- Bottom
-				{3, 1}  -- Right
+				{1, 2}, {2, 4}, {4, 3}, {3, 1}, -- Front face
+				{5, 6}, {6, 8}, {8, 7}, {7, 5}, -- Back face
+				{1, 5}, {2, 6}, {3, 7}, {4, 8}  -- Connecting edges
 			}
 
 			-- Update line positions
@@ -424,17 +441,18 @@ local UpdatingFunctions = {
 			end
 		end
 	end,
-
-	HealthText = function(Entry, TextObject, Humanoid)
+	
+	HealthText = function(Entry, TextObject, OutlineObject, Humanoid)
 		local Settings = Environment.Properties.HealthText
 
 		local ScreenCorners, OnScreen = CoreFunctions.CalculateBoundingBox(Entry)
 
 		setrenderproperty(TextObject, "Visible", OnScreen)
+		setrenderproperty(OutlineObject, "Visible", OnScreen and Settings.Outline)
 
 		if getrenderproperty(TextObject, "Visible") then
 			for Index, Value in next, Settings do
-				if Index == "Color" then
+				if Index == "Color" or Index == "Text" or Index == "Position" then
 					continue
 				end
 
@@ -449,14 +467,9 @@ local UpdatingFunctions = {
 
 			local MaxHealth = Humanoid and __index(Humanoid, "MaxHealth") or 100
 			local Health = Humanoid and mathclamp(__index(Humanoid, "Health"), 0, MaxHealth) or 0
+			local HealthPercentage = Health / MaxHealth
 
-			-- Set health text
-			setrenderproperty(TextObject, "Text", tostring(mathfloor(Health)))
-
-			-- Set color based on health
-			setrenderproperty(TextObject, "Color", CoreFunctions.GetColorFromHealth(Health, MaxHealth, 0))
-
-			-- Calculate text position based on bounding box
+			-- Calculate health bar position based on bounding box
 			local minX, maxX, minY, maxY = math.huge, -math.huge, math.huge, -math.huge
 			for _, Corner in ipairs(ScreenCorners) do
 				minX = mathmin(minX, Corner.X)
@@ -467,18 +480,36 @@ local UpdatingFunctions = {
 
 			local BoxWidth = maxX - minX
 			local BoxHeight = maxY - minY
-			local Offset = mathclamp(Settings.Offset, 8, 16)
+
+			local HealthColor = CoreFunctions.GetColorFromHealth(Health, MaxHealth, 0)
+			setrenderproperty(TextObject, "Color", HealthColor)
+			setrenderproperty(TextObject, "Text", tostring(mathfloor(Health)))
+
+			local TextPosition
+			local Offset = mathclamp(Settings.Offset, 4, 12)
 
 			if Settings.Position == 1 then -- Top
-				setrenderproperty(TextObject, "Position", Vector2new(minX + BoxWidth / 2, minY - Offset))
+				TextPosition = Vector2new(minX - 20, minY - Offset - 6)
 			elseif Settings.Position == 2 then -- Bottom
-				setrenderproperty(TextObject, "Position", Vector2new(minX + BoxWidth / 2, maxY + Offset))
+				TextPosition = Vector2new(minX - 20, maxY + Offset - 6)
 			elseif Settings.Position == 3 then -- Left
-				setrenderproperty(TextObject, "Position", Vector2new(minX - Offset, maxY - BoxHeight / 2))
+				TextPosition = Vector2new(minX - Offset - 20, maxY - BoxHeight * HealthPercentage - 6)
 			elseif Settings.Position == 4 then -- Right
-				setrenderproperty(TextObject, "Position", Vector2new(maxX + Offset, maxY - BoxHeight / 2))
+				TextPosition = Vector2new(maxX + Offset - 20, maxY - BoxHeight * HealthPercentage - 6)
 			else
 				Settings.Position = 3
+				TextPosition = Vector2new(minX - Offset - 20, maxY - BoxHeight * HealthPercentage - 6)
+			end
+
+			setrenderproperty(TextObject, "Position", TextPosition)
+
+			if Settings.Outline then
+				setrenderproperty(OutlineObject, "Position", TextPosition + Vector2new(1, 1))
+				setrenderproperty(OutlineObject, "Color", Settings.RainbowOutlineColor and CoreFunctions.GetRainbowColor() or Settings.OutlineColor)
+				setrenderproperty(OutlineObject, "Text", tostring(mathfloor(Health)))
+				setrenderproperty(OutlineObject, "Transparency", Settings.Transparency)
+				setrenderproperty(OutlineObject, "Size", Settings.Size)
+				setrenderproperty(OutlineObject, "Font", Settings.Font)
 			end
 		end
 	end
@@ -494,11 +525,11 @@ local CreatingFunctions = {
 
 		local Settings = Environment.Properties.Box
 
-		-- Create 4 lines for the 2D box
+		-- Create 12 lines for the box (4 front, 4 back, 4 connecting)
 		local BoxLines = {}
 		local BoxOutlineLines = {}
 		
-		for i = 1, 4 do
+		for i = 1, 12 do
 			BoxLines[i] = Drawingnew("Line")
 			if Settings.Outline then
 				BoxOutlineLines[i] = Drawingnew("Line")
@@ -513,7 +544,7 @@ local CreatingFunctions = {
 			end)
 
 			if not Functionable then
-				for i = 1, 4 do
+				for i = 1, 12 do
 					pcall(BoxLines[i].Remove, BoxLines[i])
 					if Settings.Outline then
 						pcall(BoxOutlineLines[i].Remove, BoxOutlineLines[i])
@@ -525,7 +556,7 @@ local CreatingFunctions = {
 			if Ready then
 				UpdatingFunctions.Box(Entry, BoxLines, BoxOutlineLines)
 			else
-				for i = 1, 4 do
+				for i = 1, 12 do
 					setrenderproperty(BoxLines[i], "Visible", false)
 					if Settings.Outline then
 						setrenderproperty(BoxOutlineLines[i], "Visible", false)
@@ -579,7 +610,7 @@ local CreatingFunctions = {
 			end
 		end)
 	end,
-
+	
 	HealthText = function(Entry)
 		local Allowed = Entry.Allowed
 
@@ -595,10 +626,13 @@ local CreatingFunctions = {
 
 		local Settings = Environment.Properties.HealthText
 
-		local Text = Drawingnew("Text")
-		local TextObject = Text
+		local Outline = Drawingnew("Text")
+		local OutlineObject = Outline
 
-		Entry.Visuals.HealthText = Text
+		local Main = Drawingnew("Text")
+		local MainObject = Main
+
+		Entry.Visuals.HealthText = {Main, Outline}
 
 		Entry.Connections.HealthText = Connect(__index(RunService, Environment.DeveloperSettings.UpdateMode), function()
 			local Functionable, Ready = pcall(function()
@@ -606,14 +640,17 @@ local CreatingFunctions = {
 			end)
 
 			if not Functionable then
-				pcall(Text.Remove, Text)
+				pcall(Main.Remove, Main)
+				pcall(Outline.Remove, Outline)
+
 				return Disconnect(Entry.Connections.HealthText)
 			end
 
 			if Ready then
-				UpdatingFunctions.HealthText(Entry, TextObject, Humanoid)
+				UpdatingFunctions.HealthText(Entry, MainObject, OutlineObject, Humanoid)
 			else
-				setrenderproperty(TextObject, "Visible", false)
+				setrenderproperty(MainObject, "Visible", false)
+				setrenderproperty(OutlineObject, "Visible", false)
 			end
 		end)
 	end
@@ -760,7 +797,7 @@ local UtilityFunctions = {
 			Visuals = {
 				Box = {},
 				HealthBar = {},
-				HealthText = nil
+				HealthText = {}
 			},
 
 			Connections = {}
