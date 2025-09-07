@@ -244,33 +244,15 @@ local CoreFunctions = {
 			return nil, false
 		end
 
-		-- Get the model that contains the part
-		local Model = IsAPlayer and __index(Object, "Character") or __index(Part, "Parent")
-		if not Model or not IsA(Model, "Model") then
-			return nil, false
-		end
-
-		-- Calculate bounding box corners
 		local CF = __index(Part, "CFrame")
-		local Size = Vector3zero
-		
-		-- Try to get the actual model size if possible
-		if pcall(function() Size = __index(Model, "GetExtentsSize") and __index(Model, "GetExtentsSize")(Model) end) then
-			-- Use model extents size
-		else
-			-- Fallback to part size for non-models
-			Size = __index(Part, "Size")
-		end
+		local Size = __index(Part, "Size")
 
+		-- Calculate 2D bounding box corners (front face only)
 		local Corners = {
-			CF * CFramenew(Size.X/2, Size.Y/2, Size.Z/2),  -- Top Front Right
-			CF * CFramenew(-Size.X/2, Size.Y/2, Size.Z/2), -- Top Front Left
-			CF * CFramenew(Size.X/2, -Size.Y/2, Size.Z/2), -- Bottom Front Right
-			CF * CFramenew(-Size.X/2, -Size.Y/2, Size.Z/2),-- Bottom Front Left
-			CF * CFramenew(Size.X/2, Size.Y/2, -Size.Z/2), -- Top Back Right
-			CF * CFramenew(-Size.X/2, Size.Y/2, -Size.Z/2),-- Top Back Left
-			CF * CFramenew(Size.X/2, -Size.Y/2, -Size.Z/2),-- Bottom Back Right
-			CF * CFramenew(-Size.X/2, -Size.Y/2, -Size.Z/2) -- Bottom Back Left
+			CF * CFramenew(Size.X/2, Size.Y/2, Size.Z/2),  -- Top Right
+			CF * CFramenew(-Size.X/2, Size.Y/2, Size.Z/2), -- Top Left
+			CF * CFramenew(Size.X/2, -Size.Y/2, Size.Z/2), -- Bottom Right
+			CF * CFramenew(-Size.X/2, -Size.Y/2, Size.Z/2) -- Bottom Left
 		}
 
 		-- Convert corners to screen space
@@ -302,7 +284,7 @@ local UpdatingFunctions = {
 		local ScreenCorners, OnScreen = CoreFunctions.CalculateBoundingBox(Entry)
 
 		-- Update visibility
-		for i = 1, 12 do
+		for i = 1, 4 do
 			setrenderproperty(BoxLines[i], "Visible", OnScreen)
 			if Settings.Outline then
 				setrenderproperty(BoxOutlineLines[i], "Visible", OnScreen)
@@ -311,7 +293,7 @@ local UpdatingFunctions = {
 
 		if OnScreen then
 			-- Update line properties
-			for i = 1, 12 do
+			for i = 1, 4 do
 				for Index, Value in next, Settings do
 					if Index == "Color" or Index == "OutlineColor" then
 						continue
@@ -335,11 +317,12 @@ local UpdatingFunctions = {
 				end
 			end
 
-			-- Define box edges (12 lines for a complete box)
+			-- Define 2D box edges (4 lines for a rectangle)
 			local Edges = {
-				{1, 2}, {2, 4}, {4, 3}, {3, 1}, -- Front face
-				{5, 6}, {6, 8}, {8, 7}, {7, 5}, -- Back face
-				{1, 5}, {2, 6}, {3, 7}, {4, 8}  -- Connecting edges
+				{1, 2}, -- Top
+				{2, 4}, -- Left
+				{4, 3}, -- Bottom
+				{3, 1}  -- Right
 			}
 
 			-- Update line positions
@@ -511,11 +494,11 @@ local CreatingFunctions = {
 
 		local Settings = Environment.Properties.Box
 
-		-- Create 12 lines for the box (4 front, 4 back, 4 connecting)
+		-- Create 4 lines for the 2D box
 		local BoxLines = {}
 		local BoxOutlineLines = {}
 		
-		for i = 1, 12 do
+		for i = 1, 4 do
 			BoxLines[i] = Drawingnew("Line")
 			if Settings.Outline then
 				BoxOutlineLines[i] = Drawingnew("Line")
@@ -530,7 +513,7 @@ local CreatingFunctions = {
 			end)
 
 			if not Functionable then
-				for i = 1, 12 do
+				for i = 1, 4 do
 					pcall(BoxLines[i].Remove, BoxLines[i])
 					if Settings.Outline then
 						pcall(BoxOutlineLines[i].Remove, BoxOutlineLines[i])
@@ -542,7 +525,7 @@ local CreatingFunctions = {
 			if Ready then
 				UpdatingFunctions.Box(Entry, BoxLines, BoxOutlineLines)
 			else
-				for i = 1, 12 do
+				for i = 1, 4 do
 					setrenderproperty(BoxLines[i], "Visible", false)
 					if Settings.Outline then
 						setrenderproperty(BoxOutlineLines[i], "Visible", false)
