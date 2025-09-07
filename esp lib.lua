@@ -219,40 +219,59 @@ local CoreFunctions = {
 		return Result
 	end,
 
-	CalculateParameters = function(Object)
+	CalculateBoundingBox = function(Object)
 		Object = type(Object) == "table" and Object.Object or Object
 
-		local DeveloperSettings = Environment.DeveloperSettings
-		local WidthBoundary = DeveloperSettings.WidthBoundary
-
 		local IsAPlayer = IsA(Object, "Player")
-
 		local Part = IsAPlayer and (FindFirstChild(Players, __index(Object, "Name")) and __index(Object, "Character"))
 		Part = IsAPlayer and Part and (__index(Part, "PrimaryPart") or FindFirstChild(Part, "HumanoidRootPart")) or Object
 
 		if not Part or IsA(Part, "Player") then
-			return nil, nil, false
+			return nil, false
 		end
 
-		local PartCFrame, PartPosition, PartUpVector = __index(Part, "CFrame"), __index(Part, "Position")
-		PartUpVector = PartCFrame.UpVector
+		-- Get the model that contains the part
+		local Model = IsAPlayer and __index(Object, "Character") or __index(Part, "Parent")
+		if not Model or not IsA(Model, "Model") then
+			return nil, false
+		end
 
-		local RigType = FindFirstChild(__index(Part, "Parent"), "Torso") and "R6" or "R15"
+		-- Calculate bounding box corners
+		local CF = __index(Part, "CFrame")
+		local Size = Vector3zero
+		
+		-- Try to get the actual model size if possible
+		if pcall(function() Size = __index(Model, "GetExtentsSize") and __index(Model, "GetExtentsSize")(Model) end) then
+			-- Use model extents size
+		else
+			-- Fallback to part size for non-models
+			Size = __index(Part, "Size")
+		end
 
-		local CameraUpVector = __index(CurrentCamera, "CFrame").UpVector
+		local Corners = {
+			CF * CFramenew(Size.X/2, Size.Y/2, Size.Z/2),  -- Top Front Right
+			CF * CFramenew(-Size.X/2, Size.Y/2, Size.Z/2), -- Top Front Left
+			CF * CFramenew(Size.X/2, -Size.Y/2, Size.Z/2), -- Bottom Front Right
+			CF * CFramenew(-Size.X/2, -Size.Y/2, Size.Z/2),-- Bottom Front Left
+			CF * CFramenew(Size.X/2, Size.Y/2, -Size.Z/2), -- Top Back Right
+			CF * CFramenew(-Size.X/2, Size.Y/2, -Size.Z/2),-- Top Back Left
+			CF * CFramenew(Size.X/2, -Size.Y/2, -Size.Z/2),-- Bottom Back Right
+			CF * CFramenew(-Size.X/2, -Size.Y/2, -Size.Z/2) -- Bottom Back Left
+		}
 
-		local Top, TopOnScreen = WorldToViewportPoint(PartPosition + (PartUpVector * (RigType == "R6" and 0.5 or 1.8)) + CameraUpVector)
-		local Bottom, BottomOnScreen = WorldToViewportPoint(PartPosition - (PartUpVector * (RigType == "R6" and 4 or 2.5)) - CameraUpVector)
+		-- Convert corners to screen space
+		local ScreenCorners = {}
+		local AllOnScreen = true
+		
+		for i, Corner in ipairs(Corners) do
+			local ScreenPos, OnScreen = WorldToViewportPoint(Corner.Position)
+			ScreenCorners[i] = Vector2new(ScreenPos.X, ScreenPos.Y)
+			if not OnScreen then
+				AllOnScreen = false
+			end
+		end
 
-		local TopX, TopY = Top.X, Top.Y
-		local BottomX, BottomY = Bottom.X, Bottom.Y
-
-		local Width = mathmax(mathfloor(mathabs(TopX - BottomX)), 3)
-		local Height = mathmax(mathfloor(mathmax(mathabs(BottomY - TopY), Width / 2)), 3)
-		local BoxSize = Vector2new(mathfloor(mathmax(Height / (IsAPlayer and WidthBoundary or 1), Width)), Height)
-		local BoxPosition = Vector2new(mathfloor(TopX / 2 + BottomX / 2 - BoxSize.X / 2), mathfloor(mathmin(TopY, BottomY)))
-
-		return BoxPosition, BoxSize, (TopOnScreen and BottomOnScreen)
+		return ScreenCorners, AllOnScreen
 	end,
 
 	GetColor = function(Player, DefaultColor)
@@ -263,40 +282,62 @@ local CoreFunctions = {
 }
 
 local UpdatingFunctions = {
-	Box = function(Entry, BoxObject, BoxOutlineObject)
+	Box = function(Entry, BoxLines, BoxOutlineLines)
 		local Settings = Environment.Properties.Box
 
-		local Position, Size, OnScreen = CoreFunctions.CalculateParameters(Entry)
+		local ScreenCorners, OnScreen = CoreFunctions.CalculateBoundingBox(Entry)
 
-		setrenderproperty(BoxObject, "Visible", OnScreen)
-		setrenderproperty(BoxOutlineObject, "Visible", OnScreen and Settings.Outline)
+		-- Update visibility
+		for i = 1, 12 do
+			setrenderproperty(BoxLines[i], "Visible", OnScreen)
+			if Settings.Outline then
+				setrenderproperty(BoxOutlineLines[i], "Visible", OnScreen)
+			end
+		end
 
-		if getrenderproperty(BoxObject, "Visible") then
-			setrenderproperty(BoxObject, "Position", Position)
-			setrenderproperty(BoxObject, "Size", Size)
+		if OnScreen then
+			-- Update line properties
+			for i = 1, 12 do
+				for Index, Value in next, Settings do
+					if Index == "Color" or Index == "OutlineColor" then
+						continue
+					end
 
-			for Index, Value in next, Settings do
-				if Index == "Color" then
-					continue
+					if not pcall(getrenderproperty, BoxLines[i], Index) then
+						continue
+					end
+
+					setrenderproperty(BoxLines[i], Index, Value)
+					if Settings.Outline then
+						setrenderproperty(BoxOutlineLines[i], Index, Value)
+					end
 				end
 
-				if not pcall(getrenderproperty, BoxObject, Index) then
-					continue
+				setrenderproperty(BoxLines[i], "Color", CoreFunctions.GetColor(Entry.Object, Settings.RainbowColor and CoreFunctions.GetRainbowColor() or Settings.Color))
+				
+				if Settings.Outline then
+					setrenderproperty(BoxOutlineLines[i], "Color", Settings.RainbowOutlineColor and CoreFunctions.GetRainbowColor() or Settings.OutlineColor)
+					setrenderproperty(BoxOutlineLines[i], "Thickness", Settings.Thickness + 1)
 				end
-
-				setrenderproperty(BoxObject, Index, Value)
 			end
 
-			setrenderproperty(BoxObject, "Color", CoreFunctions.GetColor(Entry.Object, Settings.RainbowColor and CoreFunctions.GetRainbowColor() or Settings.Color))
+			-- Define box edges (12 lines for a complete box)
+			local Edges = {
+				{1, 2}, {2, 4}, {4, 3}, {3, 1}, -- Front face
+				{5, 6}, {6, 8}, {8, 7}, {7, 5}, -- Back face
+				{1, 5}, {2, 6}, {3, 7}, {4, 8}  -- Connecting edges
+			}
 
-			if Settings.Outline then
-				setrenderproperty(BoxOutlineObject, "Position", Position)
-				setrenderproperty(BoxOutlineObject, "Size", Size)
-
-				setrenderproperty(BoxOutlineObject, "Color", Settings.RainbowOutlineColor and CoreFunctions.GetRainbowColor() or Settings.OutlineColor)
-
-				setrenderproperty(BoxOutlineObject, "Thickness", Settings.Thickness + 1)
-				setrenderproperty(BoxOutlineObject, "Transparency", Settings.Transparency)
+			-- Update line positions
+			for i, Edge in ipairs(Edges) do
+				local FromCorner, ToCorner = ScreenCorners[Edge[1]], ScreenCorners[Edge[2]]
+				setrenderproperty(BoxLines[i], "From", FromCorner)
+				setrenderproperty(BoxLines[i], "To", ToCorner)
+				
+				if Settings.Outline then
+					setrenderproperty(BoxOutlineLines[i], "From", FromCorner)
+					setrenderproperty(BoxOutlineLines[i], "To", ToCorner)
+				end
 			end
 		end
 	end,
@@ -304,7 +345,7 @@ local UpdatingFunctions = {
 	HealthBar = function(Entry, MainObject, OutlineObject, Humanoid)
 		local Settings = Environment.Properties.HealthBar
 
-		local Position, Size, OnScreen = CoreFunctions.CalculateParameters(Entry)
+		local ScreenCorners, OnScreen = CoreFunctions.CalculateBoundingBox(Entry)
 
 		setrenderproperty(MainObject, "Visible", OnScreen)
 		setrenderproperty(OutlineObject, "Visible", OnScreen and Settings.Outline)
@@ -331,37 +372,49 @@ local UpdatingFunctions = {
 
 			setrenderproperty(MainObject, "Color", CoreFunctions.GetColorFromHealth(Health, MaxHealth, Settings.Blue))
 
-			if Settings.Position == 1 then
-				setrenderproperty(MainObject, "From", Vector2new(Position.X, Position.Y - Offset))
-				setrenderproperty(MainObject, "To", Vector2new(Position.X + (Health / MaxHealth) * Size.X, Position.Y - Offset))
+			-- Calculate health bar position based on bounding box
+			local minX, maxX, minY, maxY = math.huge, -math.huge, math.huge, -math.huge
+			for _, Corner in ipairs(ScreenCorners) do
+				minX = mathmin(minX, Corner.X)
+				maxX = mathmax(maxX, Corner.X)
+				minY = mathmin(minY, Corner.Y)
+				maxY = mathmax(maxY, Corner.Y)
+			end
+
+			local BoxWidth = maxX - minX
+			local BoxHeight = maxY - minY
+
+			if Settings.Position == 1 then -- Top
+				setrenderproperty(MainObject, "From", Vector2new(minX, minY - Offset))
+				setrenderproperty(MainObject, "To", Vector2new(minX + (Health / MaxHealth) * BoxWidth, minY - Offset))
 
 				if Settings.Outline then
-					setrenderproperty(OutlineObject, "From", Vector2new(Position.X - 1, Position.Y - Offset))
-					setrenderproperty(OutlineObject, "To", Vector2new(Position.X + Size.X + 1, Position.Y - Offset))
+					setrenderproperty(OutlineObject, "From", Vector2new(minX - 1, minY - Offset))
+					setrenderproperty(OutlineObject, "To", Vector2new(minX + BoxWidth + 1, minY - Offset))
 				end
-			elseif Settings.Position == 2 then
-				setrenderproperty(MainObject, "From", Vector2new(Position.X, Position.Y + Size.Y + Offset))
-				setrenderproperty(MainObject, "To", Vector2new(Position.X + (Health / MaxHealth) * Size.X, Position.Y + Size.Y + Offset))
+			elseif Settings.Position == 2 then -- Bottom
+				setrenderproperty(MainObject, "From", Vector2new(minX, maxY + Offset))
+				setrenderproperty(MainObject, "To", Vector2new(minX + (Health / MaxHealth) * BoxWidth, maxY + Offset))
 
 				if Settings.Outline then
-					setrenderproperty(OutlineObject, "From", Vector2new(Position.X - 1, Position.Y + Size.Y + Offset))
-					setrenderproperty(OutlineObject, "To", Vector2new(Position.X + Size.X + 1, Position.Y + Size.Y + Offset))
+					setrenderproperty(OutlineObject, "From", Vector2new(minX - 1, maxY + Offset))
+					setrenderproperty(OutlineObject, "To", Vector2new(minX + BoxWidth + 1, maxY + Offset))
 				end
-			elseif Settings.Position == 3 then
-				setrenderproperty(MainObject, "From", Vector2new(Position.X - Offset, Position.Y + Size.Y))
-				setrenderproperty(MainObject, "To", Vector2new(Position.X - Offset, getrenderproperty(MainObject, "From").Y - (Health / MaxHealth) * Size.Y))
+			elseif Settings.Position == 3 then -- Left
+				setrenderproperty(MainObject, "From", Vector2new(minX - Offset, maxY))
+				setrenderproperty(MainObject, "To", Vector2new(minX - Offset, maxY - (Health / MaxHealth) * BoxHeight))
 
 				if Settings.Outline then
-					setrenderproperty(OutlineObject, "From", Vector2new(Position.X - Offset, Position.Y + Size.Y + 1))
-					setrenderproperty(OutlineObject, "To", Vector2new(Position.X - Offset, (getrenderproperty(OutlineObject, "From").Y - 1 * Size.Y) - 2))
+					setrenderproperty(OutlineObject, "From", Vector2new(minX - Offset, maxY + 1))
+					setrenderproperty(OutlineObject, "To", Vector2new(minX - Offset, maxY - BoxHeight - 1))
 				end
-			elseif Settings.Position == 4 then
-				setrenderproperty(MainObject, "From", Vector2new(Position.X + Size.X + Offset, Position.Y + Size.Y))
-				setrenderproperty(MainObject, "To", Vector2new(Position.X + Size.X + Offset, getrenderproperty(MainObject, "From").Y - (Health / MaxHealth) * Size.Y))
+			elseif Settings.Position == 4 then -- Right
+				setrenderproperty(MainObject, "From", Vector2new(maxX + Offset, maxY))
+				setrenderproperty(MainObject, "To", Vector2new(maxX + Offset, maxY - (Health / MaxHealth) * BoxHeight))
 
 				if Settings.Outline then
-					setrenderproperty(OutlineObject, "From", Vector2new(Position.X + Size.X + Offset, Position.Y + Size.Y + 1))
-					setrenderproperty(OutlineObject, "To", Vector2new(Position.X + Size.X + Offset, (getrenderproperty(OutlineObject, "From").Y - 1 * Size.Y) - 2))
+					setrenderproperty(OutlineObject, "From", Vector2new(maxX + Offset, maxY + 1))
+					setrenderproperty(OutlineObject, "To", Vector2new(maxX + Offset, maxY - BoxHeight - 1))
 				end
 			else
 				Settings.Position = 3
@@ -369,7 +422,6 @@ local UpdatingFunctions = {
 
 			if Settings.Outline then
 				setrenderproperty(OutlineObject, "Color", Settings.RainbowOutlineColor and CoreFunctions.GetRainbowColor() or Settings.OutlineColor)
-
 				setrenderproperty(OutlineObject, "Thickness", Settings.Thickness + 1)
 				setrenderproperty(OutlineObject, "Transparency", Settings.Transparency)
 			end
@@ -387,14 +439,18 @@ local CreatingFunctions = {
 
 		local Settings = Environment.Properties.Box
 
-		local BoxOutline = Drawingnew("Square")
-		local BoxOutlineObject = BoxOutline--[[._OBJECT]]
+		-- Create 12 lines for the box (4 front, 4 back, 4 connecting)
+		local BoxLines = {}
+		local BoxOutlineLines = {}
+		
+		for i = 1, 12 do
+			BoxLines[i] = Drawingnew("Line")
+			if Settings.Outline then
+				BoxOutlineLines[i] = Drawingnew("Line")
+			end
+		end
 
-		local Box = Drawingnew("Square")
-		local BoxObject = Box--[[._OBJECT]]
-
-		Entry.Visuals.Box[1] = Box
-		Entry.Visuals.Box[2] = BoxOutline
+		Entry.Visuals.Box = {Lines = BoxLines, OutlineLines = BoxOutlineLines}
 
 		Entry.Connections.Box = Connect(__index(RunService, Environment.DeveloperSettings.UpdateMode), function()
 			local Functionable, Ready = pcall(function()
@@ -402,17 +458,24 @@ local CreatingFunctions = {
 			end)
 
 			if not Functionable then
-				pcall(Box.Remove, Box)
-				pcall(BoxOutline.Remove, BoxOutline)
-
+				for i = 1, 12 do
+					pcall(BoxLines[i].Remove, BoxLines[i])
+					if Settings.Outline then
+						pcall(BoxOutlineLines[i].Remove, BoxOutlineLines[i])
+					end
+				end
 				return Disconnect(Entry.Connections.Box)
 			end
 
 			if Ready then
-				UpdatingFunctions.Box(Entry, BoxObject, BoxOutlineObject)
+				UpdatingFunctions.Box(Entry, BoxLines, BoxOutlineLines)
 			else
-				setrenderproperty(BoxObject, "Visible", false)
-				setrenderproperty(BoxOutlineObject, "Visible", false)
+				for i = 1, 12 do
+					setrenderproperty(BoxLines[i], "Visible", false)
+					if Settings.Outline then
+						setrenderproperty(BoxOutlineLines[i], "Visible", false)
+					end
+				end
 			end
 		end)
 	end,
@@ -664,7 +727,18 @@ local UtilityFunctions = {
 				end
 
 				Recursive(Value.Visuals, function(_, _Value)
-					if type(_Value) == "table" and _Value--[[._OBJECT]] then
+					if type(_Value) == "table" then
+						if _Value.Lines then
+							for _, Line in ipairs(_Value.Lines) do
+								pcall(Line.Remove, Line)
+							end
+						end
+						if _Value.OutlineLines then
+							for _, Line in ipairs(_Value.OutlineLines) do
+								pcall(Line.Remove, Line)
+							end
+						end
+					elseif _Value--[[._OBJECT]] then
 						pcall(_Value.Remove, _Value)
 					end
 				end)
